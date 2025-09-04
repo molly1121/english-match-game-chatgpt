@@ -4,559 +4,201 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
     <title>老年友好的英语单词消消乐—海关词汇（三关）</title>
-    <!-- Tailwind Play CDN (OK for demos/sharing) -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-      tailwind.config = { theme: { extend: {} } };
-    </script>
-    <style>
-      html, body { height: 100%; }
-    </style>
+    <script>tailwind.config = { theme: { extend: {} } };</script>
+    <style>html,body{height:100%}</style>
   </head>
   <body class="min-h-screen bg-white">
     <div id="root"></div>
 
-    <!-- React 18 UMD -->
+    <!-- React 18 UMD & Babel（在浏览器里直接运行 TSX/JSX） -->
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-    <!-- Babel Standalone to transpile TSX in the browser -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
     <script type="text/babel" data-presets="typescript,react">
-      // === Adapted App from canvas: imports/exports removed; default export -> App ===
-
-      // —— 常量（供组件与测试共用） ——
-      const DEFAULT_ROWS = 6;
-      const DEFAULT_COLS = 6;
-      const TEST_CELL = 96;
-
+      const DEFAULT_ROWS = 6, DEFAULT_COLS = 6, TEST_CELL = 96;
       const SWIPE_COMMIT = Math.min(48, Math.max(32, Math.round(TEST_CELL * 0.45)));
       const SWIPE_PREVIEW = Math.round(SWIPE_COMMIT * 0.6);
+      const LEVEL_TARGET = {1:150,2:220,3:0};
+      const shouldUnlockNext = (lv, s) => (lv===1? s>=LEVEL_TARGET[1] : lv===2? s>=LEVEL_TARGET[2] : false);
 
-      const LEVEL_TARGET = { 1: 150, 2: 220, 3: 0 };
-      function shouldUnlockNext(currentLevel, score) {
-        if (currentLevel === 1) return score >= LEVEL_TARGET[1];
-        if (currentLevel === 2) return score >= LEVEL_TARGET[2];
-        return false;
-      }
-
-      function fitFontPx(word, base, cellPx) {
-        const PADDING_X = 16;
-        const inner = Math.max(0, cellPx - PADDING_X);
-        const avgCharWidthCoeff = 0.6;
+      const fitFontPx = (word, base, cell) => {
+        const inner = Math.max(0, cell - 16);
         const len = Math.max(1, word.length);
-        const maxSizeByWidth = Math.floor(inner / (len * avgCharWidthCoeff));
-        const MIN = 12;
-        return Math.max(MIN, Math.min(base, maxSizeByWidth));
-      }
+        const maxSize = Math.floor(inner / (len * 0.6));
+        return Math.max(12, Math.min(base, maxSize));
+      };
+      const directionFromDelta = (dx,dy,t=24)=>{const ax=Math.abs(dx),ay=Math.abs(dy);if(ax<t&&ay<t)return null;return ax>ay?(dx>0?'right':'left'):(dy>0?'down':'up')};
+      const neighborFromDirection = (r,c,dir,rows=DEFAULT_ROWS,cols=DEFAULT_COLS)=>({left:()=>c>0?{r,c:c-1}:null,right:()=>c<cols-1?{r,c:c+1}:null,up:()=>r>0?{r:r-1,c}:null,down:()=>r<rows-1?{r:r+1,c}:null}[dir]());
+      const safeIndex=(i,len)=>len<=0?0: (i>=0&&i<len?i:(((i%len)+len)%len));
+      const fisherYates=a=>{a=a.slice();for(let i=a.length-1;i>0;i++){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
+      const hasImmediateMatches=(g,rows,cols)=>{for(let r=0;r<rows;r++){let s=0;for(let c=1;c<=cols;c++){if(c<cols&&g[r][c]===g[r][c-1])continue;const L=c-s;if(L>=3)return true;s=c}}for(let c=0;c<cols;c++){let s=0;for(let r=1;r<=rows;r++){if(r<rows&&g[r][c]===g[r-1][c])continue;const L=r-s;if(L>=3)return true;s=r}}return false};
+      const computeCellPx=(avail,cols,gap,maxCell,minCell=52)=>{const inner=Math.max(0,avail-(cols-1)*gap);const raw=Math.floor(inner/cols);return Math.max(minCell,Math.min(maxCell,raw))};
 
-      function directionFromDelta(dx, dy, threshold = 24) {
-        const ax = Math.abs(dx), ay = Math.abs(dy);
-        if (ax < threshold && ay < threshold) return null;
-        if (ax > ay) return dx > 0 ? "right" : "left";
-        return dy > 0 ? "down" : "up";
-      }
-
-      function neighborFromDirection(r, c, dir, rows = DEFAULT_ROWS, cols = DEFAULT_COLS) {
-        switch (dir) {
-          case "left": return c > 0 ? { r, c: c - 1 } : null;
-          case "right": return c < cols - 1 ? { r, c: c + 1 } : null;
-          case "up": return r > 0 ? { r: r - 1, c } : null;
-          case "down": return r < rows - 1 ? { r: r + 1, c } : null;
-          default: return null;
-        }
-      }
-
-      function safeIndex(i, len) {
-        if (len <= 0) return 0;
-        if (i >= 0 && i < len) return i;
-        return ((i % len) + len) % len;
-      }
-
-      function fisherYates(arr) {
-        const a = arr.slice();
-        for (let i = a.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          const t = a[i]; a[i] = a[j]; a[j] = t;
-        }
-        return a;
-      }
-
-      function hasImmediateMatches(g, rows, cols) {
-        for (let r = 0; r < rows; r++) {
-          let runStart = 0;
-          for (let c = 1; c <= cols; c++) {
-            if (c < cols && g[r][c] === g[r][c - 1]) continue;
-            const runLen = c - runStart;
-            if (runLen >= 3) return true;
-            runStart = c;
-          }
-        }
-        for (let c = 0; c < cols; c++) {
-          let runStart = 0;
-          for (let r = 1; r <= rows; r++) {
-            if (r < rows && g[r][c] === g[r - 1][c]) continue;
-            const runLen = r - runStart;
-            if (runLen >= 3) return true;
-            runStart = r;
-          }
-        }
-        return false;
-      }
-
-      const LEVELS = {
-        1: [
-          { key: "passport", cn: "护照", ipa: "ˈpɑːspɔːt", phrase: "Show your passport." },
-          { key: "visa", cn: "签证", ipa: "ˈviːzə", phrase: "Do you have a visa?" },
-          { key: "customs", cn: "海关", ipa: "ˈkʌstəmz", phrase: "Go to customs." },
-          { key: "officer", cn: "工作人员/官员", ipa: "ˈɒfɪsə", phrase: "Ask the officer." },
-          { key: "luggage", cn: "行李", ipa: "ˈlʌɡɪdʒ", phrase: "Check your luggage." },
-          { key: "declare", cn: "申报", ipa: "dɪˈkleə", phrase: "I need to declare." },
-        ],
-        2: [
-          { key: "form", cn: "表格", ipa: "fɔːm", phrase: "Fill in the form." },
-          { key: "stamp", cn: "盖章/戳记", ipa: "stæmp", phrase: "Get a stamp." },
-          { key: "entry", cn: "入境", ipa: "ˈɛntri", phrase: "Entry to the country." },
-          { key: "exit", cn: "出境/出口", ipa: "ˈɛksɪt", phrase: "Exit is there." },
-          { key: "suitcase", cn: "手提箱/行李箱", ipa: "ˈsuːtkeɪs", phrase: "My suitcase is heavy." },
-          { key: "queue", cn: "排队", ipa: "kjuː", phrase: "Please join the queue." },
-          { key: "scan", cn: "扫描", ipa: "skæn", phrase: "We will scan your bag." },
-          { key: "address", cn: "地址", ipa: "əˈdrɛs", phrase: "Your address, please." },
-          { key: "stay", cn: "停留/逗留", ipa: "steɪ", phrase: "How long will you stay?" },
-          { key: "purpose", cn: "目的", ipa: "ˈpɜːpəs", phrase: "What is the purpose?" },
-        ],
-        3: [
-          { key: "duty", cn: "关税", ipa: "ˈdjuːti", phrase: "Pay the duty." },
-          { key: "tax", cn: "税", ipa: "tæks", phrase: "This tax is included." },
-          { key: "value", cn: "价值/申报价值", ipa: "ˈvæljuː", phrase: "What is the value?" },
-          { key: "cash", cn: "现金", ipa: "kæʃ", phrase: "How much cash?" },
-          { key: "currency", cn: "货币", ipa: "ˈkʌrənsi", phrase: "Declare your currency." },
-          { key: "alcohol", cn: "酒精饮品", ipa: "ˈælkəhɒl", phrase: "Any alcohol?" },
-          { key: "tobacco", cn: "烟草", ipa: "təˈbækəʊ", phrase: "Any tobacco?" },
-          { key: "medicine", cn: "药品", ipa: "ˈmɛdɪsɪn", phrase: "Do you carry medicine?" },
-          { key: "food", cn: "食品", ipa: "fuːd", phrase: "Any food?" },
-          { key: "plant", cn: "植物", ipa: "plɑːnt", phrase: "Any plants?" },
-          { key: "animal", cn: "动物", ipa: "ˈænɪməl", phrase: "Any animal products?" },
-          { key: "quarantine", cn: "检疫/隔离", ipa: "ˈkwɒrəntiːn", phrase: "This item is in quarantine." },
-          { key: "inspection", cn: "检查", ipa: "ɪnˈspɛkʃən", phrase: "We need an inspection." },
-          { key: "receipt", cn: "收据", ipa: "rɪˈsiːt", phrase: "Keep the receipt." },
-        ],
+      const LEVELS={
+        1:[{key:'passport',cn:'护照',ipa:'ˈpɑːspɔːt',phrase:'Show your passport.'},
+           {key:'visa',cn:'签证',ipa:'ˈviːzə',phrase:'Do you have a visa?'},
+           {key:'customs',cn:'海关',ipa:'ˈkʌstəmz',phrase:'Go to customs.'},
+           {key:'officer',cn:'工作人员/官员',ipa:'ˈɒfɪsə',phrase:'Ask the officer.'},
+           {key:'luggage',cn:'行李',ipa:'ˈlʌɡɪdʒ',phrase:'Check your luggage.'},
+           {key:'declare',cn:'申报',ipa:'dɪˈkleə',phrase:'I need to declare.'}],
+        2:[{key:'form',cn:'表格',ipa:'fɔːm',phrase:'Fill in the form.'},
+           {key:'stamp',cn:'盖章/戳记',ipa:'stæmp',phrase:'Get a stamp.'},
+           {key:'entry',cn:'入境',ipa:'ˈɛntri',phrase:'Entry to the country.'},
+           {key:'exit',cn:'出境/出口',ipa:'ˈɛksɪt',phrase:'Exit is there.'},
+           {key:'suitcase',cn:'手提箱/行李箱',ipa:'ˈsuːtkeɪs',phrase:'My suitcase is heavy.'},
+           {key:'queue',cn:'排队',ipa:'kjuː',phrase:'Please join the queue.'},
+           {key:'scan',cn:'扫描',ipa:'skæn',phrase:'We will scan your bag.'},
+           {key:'address',cn:'地址',ipa:'əˈdrɛs',phrase:'Your address, please.'},
+           {key:'stay',cn:'停留/逗留',ipa:'steɪ',phrase:'How long will you stay?'},
+           {key:'purpose',cn:'目的',ipa:'ˈpɜːpəs',phrase:'What is the purpose?'}],
+        3:[{key:'duty',cn:'关税',ipa:'ˈdjuːti',phrase:'Pay the duty.'},
+           {key:'tax',cn:'税',ipa:'tæks',phrase:'This tax is included.'},
+           {key:'value',cn:'价值/申报价值',ipa:'ˈvæljuː',phrase:'What is the value?'},
+           {key:'cash',cn:'现金',ipa:'kæʃ',phrase:'How much cash?'},
+           {key:'currency',cn:'货币',ipa:'ˈkʌrənsi',phrase:'Declare your currency.'},
+           {key:'alcohol',cn:'酒精饮品',ipa:'ˈælkəhɒl',phrase:'Any alcohol?'},
+           {key:'tobacco',cn:'烟草',ipa:'təˈbækəʊ',phrase:'Any tobacco?'},
+           {key:'medicine',cn:'药品',ipa:'ˈmɛdɪsɪn',phrase:'Do you carry medicine?'},
+           {key:'food',cn:'食品',ipa:'fuːd',phrase:'Any food?'},
+           {key:'plant',cn:'植物',ipa:'plɑːnt',phrase:'Any plants?'},
+           {key:'animal',cn:'动物',ipa:'ˈænɪməl',phrase:'Any animal products?'},
+           {key:'quarantine',cn:'检疫/隔离',ipa:'ˈkwɒrəntiːn',phrase:'This item is in quarantine.'},
+           {key:'inspection',cn:'检查',ipa:'ɪnˈspɛkʃən',phrase:'We need an inspection.'},
+           {key:'receipt',cn:'收据',ipa:'rɪˈsiːt',phrase:'Keep the receipt.'}],
       };
 
-      function App() {
-        const ROWS = DEFAULT_ROWS;
-        const COLS = DEFAULT_COLS;
-        const MOVES = 20;
+      function App(){
+        const ROWS=DEFAULT_ROWS, COLS=DEFAULT_COLS, MOVES=20;
+        const [level,setLevel]=React.useState(1);
+        const WORDS=React.useMemo(()=>LEVELS[level],[level]);
+        const [unlocked,setUnlocked]=React.useState(()=>{try{const raw=localStorage.getItem('wm_unlocked');if(raw){return new Set(JSON.parse(raw))}}catch{}return new Set([1])});
+        React.useEffect(()=>{try{localStorage.setItem('wm_unlocked',JSON.stringify(Array.from(unlocked)))}catch{}},[unlocked]);
 
-        const [level, setLevel] = React.useState(1);
-        const WORDS = React.useMemo(() => LEVELS[level], [level]);
+        const COLOR=['bg-blue-100 border-blue-300','bg-green-100 border-green-300','bg-yellow-100 border-yellow-300','bg-purple-100 border-purple-300','bg-rose-100 border-rose-300','bg-teal-100 border-teal-300','bg-orange-100 border-orange-300','bg-sky-100 border-sky-300'];
 
-        const [unlocked, setUnlocked] = React.useState(() => {
-          try {
-            const raw = localStorage.getItem("wm_unlocked");
-            if (raw) {
-              const arr = JSON.parse(raw);
-              return new Set(arr);
-            }
-          } catch {}
-          return new Set([1]);
-        });
-        React.useEffect(() => {
-          try { localStorage.setItem("wm_unlocked", JSON.stringify(Array.from(unlocked))); } catch {}
-        }, [unlocked]);
+        const [grid,setGrid]=React.useState(()=>createInitialGrid(ROWS,COLS,WORDS.length));
+        const [selected,setSelected]=React.useState(null);
+        const swipeRef=React.useRef(null);
+        const [dragTarget,setDragTarget]=React.useState(null);
+        const justSwappedRef=React.useRef(false);
+        const [score,setScore]=React.useState(0);
+        const [movesLeft,setMovesLeft]=React.useState(MOVES);
+        const [lastMatch,setLastMatch]=React.useState([]);
+        const [bigFont,setBigFont]=React.useState(true);
+        const [showChinese,setShowChinese]=React.useState(true);
+        const [speakOnMatch,setSpeakOnMatch]=React.useState(true);
+        const [isBusy,setIsBusy]=React.useState(false);
+        const [passInfo,setPassInfo]=React.useState(null);
 
-        const COLOR_BY_INDEX = [
-          "bg-blue-100 border-blue-300",
-          "bg-green-100 border-green-300",
-          "bg-yellow-100 border-yellow-300",
-          "bg-purple-100 border-purple-300",
-          "bg-rose-100 border-rose-300",
-          "bg-teal-100 border-teal-300",
-          "bg-orange-100 border-orange-300",
-          "bg-sky-100 border-sky-300",
-        ];
+        const firstLoad=React.useRef(true);
+        React.useEffect(()=>{ if(firstLoad.current){firstLoad.current=false;return;} resetGameForKinds(WORDS.length); },[level]);
 
-        const [grid, setGrid] = React.useState(() => createInitialGrid(ROWS, COLS, WORDS.length));
-        const [selected, setSelected] = React.useState(null);
-        const swipeRef = React.useRef(null);
-        const [dragTarget, setDragTarget] = React.useState(null);
-        const justSwappedRef = React.useRef(false);
-        const [score, setScore] = React.useState(0);
-        const [movesLeft, setMovesLeft] = React.useState(MOVES);
-        const [lastMatch, setLastMatch] = React.useState([]);
-        const [bigFont, setBigFont] = React.useState(true);
-        const [showChinese, setShowChinese] = React.useState(true);
-        const [speakOnMatch, setSpeakOnMatch] = React.useState(true);
-        const [isBusy, setIsBusy] = React.useState(false);
-        const [passInfo, setPassInfo] = React.useState(null);
+        // —— 自适应：按容器宽度计算格子大小 —— 
+        const boardWrapRef=React.useRef(null);
+        const [cellPx,setCellPx]=React.useState(96);
+        React.useEffect(()=>{
+          const recompute=()=>{
+            const avail=boardWrapRef.current?.clientWidth ?? (window.innerWidth-32);
+            const gap=bigFont?8:6, maxCell=bigFont?96:80;
+            setCellPx(computeCellPx(avail,COLS,gap,maxCell,52));
+          };
+          recompute();
+          window.addEventListener('resize',recompute);
+          window.addEventListener('orientationchange',recompute);
+          return ()=>{window.removeEventListener('resize',recompute);window.removeEventListener('orientationchange',recompute)};
+        },[COLS,bigFont]);
 
-        const firstLoad = React.useRef(true);
-        React.useEffect(() => {
-          if (firstLoad.current) { firstLoad.current = false; return; }
-          resetGameForKinds(WORDS.length);
-        }, [level]);
+        const COMMIT_THRES=Math.min(48,Math.max(28,Math.round(cellPx*0.45)));
+        const PREVIEW_THRES=Math.round(COMMIT_THRES*0.6);
 
-        const speak = (text) => {
-          try {
-            const u = new SpeechSynthesisUtterance(text);
-            u.lang = "en-GB"; u.rate = 0.9;
-            window.speechSynthesis?.speak(u);
-          } catch {}
-        };
+        const speak=(t)=>{try{const u=new SpeechSynthesisUtterance(t);u.lang='en-GB';u.rate=0.9;window.speechSynthesis?.speak(u);}catch{}};
 
-        function createInitialGrid(rows, cols, kinds) {
-          const g = Array.from({ length: rows }, () => Array(cols).fill(0));
-          for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-              let tries = 0;
-              do {
-                g[r][c] = Math.floor(Math.random() * kinds);
-                tries++;
-              } while ((createsRun(g, r, c, cols) || createsRunVertical(g, r, c, rows)) && tries < 50);
-            }
-          }
-          return g;
-        }
-        function createsRun(g, r, c, COLS_LOCAL) {
-          const v = g[r][c];
-          return (
-            (c >= 2 && g[r][c - 1] === v && g[r][c - 2] === v) ||
-            (c >= 1 && c + 1 < COLS_LOCAL && g[r][c - 1] === v && g[r][c + 1] === v) ||
-            (c + 2 < COLS_LOCAL && g[r][c + 1] === v && g[r][c + 2] === v)
-          );
-        }
-        function createsRunVertical(g, r, c, ROWS_LOCAL) {
-          const v = g[r][c];
-          return (
-            (r >= 2 && g[r - 1][c] === v && g[r - 2][c] === v) ||
-            (r >= 1 && r + 1 < ROWS_LOCAL && g[r - 1][c] === v && g[r + 1][c] === v) ||
-            (r + 2 < ROWS_LOCAL && g[r + 1][c] === v && g[r + 2][c] === v)
-          );
-        }
-        function findMatches(g) {
-          const toClear = new Set();
-          for (let r = 0; r < ROWS; r++) {
-            let runStart = 0;
-            for (let c = 1; c <= COLS; c++) {
-              if (c < COLS && g[r][c] === g[r][c - 1]) continue;
-              const runLen = c - runStart;
-              if (runLen >= 3) { for (let k = runStart; k < c; k++) toClear.add(`${r},${k}`); }
-              runStart = c;
-            }
-          }
-          for (let c = 0; c < COLS; c++) {
-            let runStart = 0;
-            for (let r = 1; r <= ROWS; r++) {
-              if (r < ROWS && g[r][c] === g[r - 1][c]) continue;
-              const runLen = r - runStart;
-              if (runLen >= 3) { for (let k = runStart; k < r; k++) toClear.add(`${k},${c}`); }
-              runStart = r;
-            }
-          }
-          const coords = [];
-          toClear.forEach((key) => {
-            const [rs, cs] = key.split(",").map(Number);
-            coords.push({ r: rs, c: cs, v: g[rs][cs] });
-          });
-          return coords;
-        }
-        function cloneGrid(g) { return g.map((row) => row.slice()); }
-        function collapseAndRefill(g) {
-          for (let c = 0; c < COLS; c++) {
-            let write = ROWS - 1;
-            for (let r = ROWS - 1; r >= 0; r--) {
-              if (g[r][c] !== -1) { g[write][c] = g[r][c]; write--; }
-            }
-            for (let r = write; r >= 0; r--) {
-              g[r][c] = Math.floor(Math.random() * WORDS.length);
-            }
-          }
-        }
-        async function resolveMatchesCascade(base) {
-          let totalCleared = 0;
-          let g = cloneGrid(base);
-          let uniqueWords = new Set();
-          while (true) {
-            const matches = findMatches(g);
-            if (matches.length === 0) break;
-            totalCleared += matches.length;
-            matches.forEach((m) => uniqueWords.add(m.v));
-            matches.forEach(({ r, c }) => (g[r][c] = -1));
-            collapseAndRefill(g);
-          }
-          return { g, totalCleared, uniqueWords: Array.from(uniqueWords) };
-        }
-        function areAdjacent(a, b) {
-          const dr = Math.abs(a.r - b.r);
-          const dc = Math.abs(a.c - b.c);
-          return dr + dc === 1;
-        }
-        async function trySwap(a, b) {
-          if (!areAdjacent(a, b)) return;
-          setIsBusy(true);
-          const g = cloneGrid(grid);
-          const tmp = g[a.r][a.c]; g[a.r][a.c] = g[b.r][b.c]; g[b.r][b.c] = tmp;
-          const initialMatches = findMatches(g);
-          if (initialMatches.length === 0) { setSelected(null); setIsBusy(false); return; }
+        function createInitialGrid(rows,cols,kinds){const g=Array.from({length:rows},()=>Array(cols).fill(0));for(let r=0;r<rows;r++){for(let c=0;c<cols;c++){let tries=0;do{g[r][c]=Math.floor(Math.random()*kinds);tries++;}while((createsRun(g,r,c,cols)||createsRunVertical(g,r,c,rows))&&tries<50)}}return g}
+        function createsRun(g,r,c,C){const v=g[r][c];return (c>=2&&g[r][c-1]===v&&g[r][c-2]===v)||(c>=1&&c+1<C&&g[r][c-1]===v&&g[r][c+1]===v)||(c+2<C&&g[r][c+1]===v&&g[r][c+2]===v)}
+        function createsRunVertical(g,r,c,R){const v=g[r][c];return (r>=2&&g[r-1][c]===v&&g[r-2][c]===v)||(r>=1&&r+1<R&&g[r-1][c]===v&&g[r+1][c]===v)||(r+2<R&&g[r+1][c]===v&&g[r+2][c]===v)}
+        function findMatches(g){const toClear=new Set();for(let r=0;r<ROWS;r++){let s=0;for(let c=1;c<=COLS;c++){if(c<COLS&&g[r][c]===g[r][c-1])continue;const L=c-s;if(L>=3){for(let k=s;k<c;k++)toClear.add(`${r},${k}`)}s=c}}for(let c=0;c<COLS;c++){let s=0;for(let r=1;r<=ROWS;r++){if(r<ROWS&&g[r][c]===g[r-1][c])continue;const L=r-s;if(L>=3){for(let k=s;k<r;k++)toClear.add(`${k},${c}`)}s=r}}const coords=[];toClear.forEach(key=>{const [rs,cs]=key.split(',').map(Number);coords.push({r:rs,c:cs,v:g[rs][cs]})});return coords}
+        const cloneGrid=g=>g.map(r=>r.slice());
+        function collapseAndRefill(g){for(let c=0;c<COLS;c++){let w=ROWS-1;for(let r=ROWS-1;r>=0;r--){if(g[r][c]!==-1){g[w][c]=g[r][c];w--;}}for(let r=w;r>=0;r--){g[r][c]=Math.floor(Math.random()*WORDS.length)}}}
+        async function resolveMatchesCascade(base){let total=0;let g=cloneGrid(base);let uniq=new Set();while(true){const m=findMatches(g);if(m.length===0)break;total+=m.length;m.forEach(x=>uniq.add(x.v));m.forEach(({r,c})=>g[r][c]=-1);collapseAndRefill(g)}return {g,totalCleared:total,uniqueWords:Array.from(uniq)}}
+        const areAdjacent=(a,b)=>Math.abs(a.r-b.r)+Math.abs(a.c-b.c)===1;
+        async function trySwap(a,b){if(!areAdjacent(a,b))return;setIsBusy(true);const g=cloneGrid(grid);[g[a.r][a.c],g[b.r][b.c]]=[g[b.r][b.c],g[a.r][a.c]];const m0=findMatches(g);if(m0.length===0){setSelected(null);setIsBusy(false);return}const {g:after,totalCleared,uniqueWords}=await resolveMatchesCascade(g);setGrid(after);const newScore=score+totalCleared*10;if((level===1||level===2)&&shouldUnlockNext(level,newScore)){const next=level===1?2:3;if(!unlocked.has(next)&&!passInfo){setUnlocked(s=>{const n=new Set(s);n.add(next);return n});setPassInfo({level,next});setTimeout(()=>{setPassInfo(null);setLevel(next)},1800)}}setScore(newScore);setMovesLeft(m=>Math.max(0,m-1));setLastMatch(uniqueWords);if(speakOnMatch&&uniqueWords.length>0)speak(WORDS[safeIndex(uniqueWords[0],WORDS.length)].key);setSelected(null);setIsBusy(false)}
 
-          const { g: after, totalCleared, uniqueWords } = await resolveMatchesCascade(g);
-          setGrid(after);
+        const onPointerDown=(r,c)=>(e)=>{try{e.currentTarget.setPointerCapture(e.pointerId)}catch{};swipeRef.current={r,c,x:e.clientX,y:e.clientY,id:e.pointerId};setSelected({r,c})};
+        const onPointerMove=(r,c)=>(e)=>{const s=swipeRef.current;if(!s||s.id!==e.pointerId)return;const dx=e.clientX-s.x,dy=e.clientY-s.y;const dir=directionFromDelta(dx,dy,PREVIEW_THRES);if(!dir){setDragTarget(null);return}setDragTarget(neighborFromDirection(s.r,s.c,dir,ROWS,COLS))};
+        const onPointerUp=(r,c)=>(e)=>{const s=swipeRef.current;const dx=s?e.clientX-s.x:0,dy=s?e.clientY-s.y:0;const dir=directionFromDelta(dx,dy,COMMIT_THRES);if(s&&s.id===e.pointerId&&dir&&!isBusy&&movesLeft>0){const nbr=neighborFromDirection(s.r,s.c,dir,ROWS,COLS);if(nbr){justSwappedRef.current=true;trySwap({r:s.r,c:s.c},nbr)}}setSelected(null);setDragTarget(null);swipeRef.current=null};
+        const onTileClick=(r,c)=>{if(justSwappedRef.current){justSwappedRef.current=false;return}if(isBusy||movesLeft===0)return;if(!selected){setSelected({r,c})}else{const here={r,c};if(selected.r===r&&selected.c===c)setSelected(null);else if(areAdjacent(selected,here))trySwap(selected,here);else setSelected(here)}};
 
-          const gained = totalCleared * 10;
-          const newScore = score + gained;
-          if ((level === 1 || level === 2) && shouldUnlockNext(level, newScore)) {
-            const nextLv = (level === 1 ? 2 : 3);
-            if (!unlocked.has(nextLv) && !passInfo) {
-              setUnlocked((prevSet) => {
-                const next = new Set(prevSet); next.add(nextLv); return next;
-              });
-              setPassInfo({ level, next: nextLv });
-              try { window.setTimeout(() => { setPassInfo(null); setLevel(nextLv); }, 1800); } catch {}
-            }
-          }
-          setScore(newScore);
-          setMovesLeft((m) => Math.max(0, m - 1));
-          setLastMatch(uniqueWords);
-          if (speakOnMatch && uniqueWords.length > 0) speak(WORDS[safeIndex(uniqueWords[0], WORDS.length)].key);
-          setSelected(null);
-          setIsBusy(false);
-        }
+        const resetGameForKinds=(k)=>{setGrid(createInitialGrid(ROWS,COLS,k));setSelected(null);setScore(0);setMovesLeft(MOVES);setLastMatch([])};
+        const resetGame=()=>resetGameForKinds(WORDS.length);
+        const shuffleBoard=()=>{if(isBusy)return;const flat=grid.flat();const kinds=WORDS.length;if(kinds<=1)return;let t=0;while(t<40){const sh=fisherYates(flat);const g2=Array.from({length:ROWS},(_,r)=>sh.slice(r*COLS,(r+1)*COLS));if(!hasImmediateMatches(g2,ROWS,COLS)){setGrid(g2);setSelected(null);setDragTarget(null);setLastMatch([]);return}t++}setGrid(createInitialGrid(ROWS,COLS,kinds));setSelected(null);setDragTarget(null);setLastMatch([])};
+        const chooseLevel=(lv)=>{if(lv===level)return;if(!unlocked.has(lv))return;setLevel(lv)};
 
-        const CELL = bigFont ? 96 : 80;
-        const COMMIT_THRES = Math.min(48, Math.max(32, Math.round(CELL * 0.45)));
-        const PREVIEW_THRES = Math.round(COMMIT_THRES * 0.6);
-
-        const onPointerDownTile = (r, c) => (e) => {
-          try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
-          swipeRef.current = { r, c, x: e.clientX, y: e.clientY, id: e.pointerId };
-          setSelected({ r, c });
-        };
-        const onPointerMoveTile = (r, c) => (e) => {
-          const s = swipeRef.current;
-          if (!s || s.id !== e.pointerId) return;
-          const dx = e.clientX - s.x;
-          const dy = e.clientY - s.y;
-          const dirPreview = directionFromDelta(dx, dy, PREVIEW_THRES);
-          if (!dirPreview) { setDragTarget(null); return; }
-          const nbr = neighborFromDirection(s.r, s.c, dirPreview, ROWS, COLS);
-          setDragTarget(nbr);
-        };
-        const onPointerUpTile = (r, c) => (e) => {
-          const s = swipeRef.current;
-          const dx = s ? e.clientX - s.x : 0;
-          const dy = s ? e.clientY - s.y : 0;
-          const dir = directionFromDelta(dx, dy, COMMIT_THRES);
-          if (s && s.id === e.pointerId && dir && !isBusy && movesLeft > 0) {
-            const nbr = neighborFromDirection(s.r, s.c, dir, ROWS, COLS);
-            if (nbr) { justSwappedRef.current = true; trySwap({ r: s.r, c: s.c }, nbr); }
-          }
-          setSelected(null); setDragTarget(null); swipeRef.current = null;
-        };
-        const onTileClick = (r, c) => {
-          if (justSwappedRef.current) { justSwappedRef.current = false; return; }
-          if (isBusy || movesLeft === 0) return;
-          if (!selected) {
-            setSelected({ r, c });
-          } else {
-            const here = { r, c };
-            if (selected.r === r && selected.c === c) setSelected(null);
-            else if (areAdjacent(selected, here)) trySwap(selected, here);
-            else setSelected(here);
-          }
-        };
-
-        const resetGameForKinds = (kinds) => {
-          setGrid(createInitialGrid(ROWS, COLS, kinds));
-          setSelected(null); setScore(0); setMovesLeft(MOVES); setLastMatch([]);
-        };
-        const resetGame = () => resetGameForKinds(WORDS.length);
-
-        const shuffleBoard = () => {
-          if (isBusy) return;
-          const flat = grid.flat();
-          const kinds = WORDS.length;
-          if (kinds <= 1) return;
-          let tries = 0;
-          while (tries < 40) {
-            const shuffled = fisherYates(flat);
-            const g2 = Array.from({ length: ROWS }, (_, r) => shuffled.slice(r * COLS, (r + 1) * COLS));
-            if (!hasImmediateMatches(g2, ROWS, COLS)) {
-              setGrid(g2); setSelected(null); setDragTarget(null); setLastMatch([]); return;
-            }
-            tries++;
-          }
-          setGrid(createInitialGrid(ROWS, COLS, kinds));
-          setSelected(null); setDragTarget(null); setLastMatch([]);
-        };
-
-        const chooseLevel = (lv) => {
-          if (lv === level) return;
-          if (!unlocked.has(lv)) return;
-          setLevel(lv);
-        };
-
-        return (
-          <div className="min-h-screen w-full bg-white text-gray-900 flex flex-col items-center p-4 md:p-6">
-            <div className="w-full max-w-6xl">
-              <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-3 mb-4">
-                <div>
-                  <h1 className="text-2xl md:text-3xl font-bold">消消乐学单词（海关词汇·三关）</h1>
-                  <p className="text-gray-700 mt-1">玩法（手机）：按住格子向上下左右滑动进行交换；（电脑）：点击一个格子再点相邻格子。连成3个或以上相同单词即可消除并学习。</p>
+        return (<div className="min-h-screen w-full bg-white text-gray-900 flex flex-col items-center p-4 md:p-6">
+          <div className="w-full max-w-6xl">
+            <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-3 mb-4">
+              <div>
+                <h1 className="text-2xl md:text-3xl font-bold">消消乐学单词（海关词汇·三关）</h1>
+                <p className="text-gray-700 mt-1">玩法（手机）：按住格子向上下左右滑动进行交换；（电脑）：点击一个格子再点相邻格子。连成3个或以上相同单词即可消除并学习。</p>
+              </div>
+              <div className="flex gap-2 flex-wrap items-center">
+                <div className="flex gap-2">
+                  {[1,2,3].map(lv => (<button key={lv} onClick={()=>chooseLevel(lv)} disabled={!unlocked.has(lv)} className={`px-4 py-2 rounded-2xl shadow border text-base md:text-lg ${level===lv?'bg-blue-50 border-blue-300':''} ${!unlocked.has(lv)?'opacity-60 cursor-not-allowed':''}`} aria-pressed={level===lv} aria-disabled={!unlocked.has(lv)}>{lv===1?'第一关（6词）':lv===2?'第二关（10词）':'第三关（14词）'}</button>))}
                 </div>
-                <div className="flex gap-2 flex-wrap items-center">
-                  <div className="flex gap-2">
-                    {[1,2,3].map((lv) => (
-                      <button
-                        key={lv}
-                        onClick={() => chooseLevel(lv)}
-                        disabled={!unlocked.has(lv)}
-                        className={`px-4 py-2 rounded-2xl shadow border text-base md:text-lg ${level === lv ? "bg-blue-50 border-blue-300" : ""} ${!unlocked.has(lv) ? "opacity-60 cursor-not-allowed" : ""}`}
-                        aria-pressed={level === lv}
-                        aria-disabled={!unlocked.has(lv)}
-                      >{lv === 1 ? "第一关（6词）" : lv === 2 ? "第二关（10词）" : "第三关（14词）"}</button>
-                    ))}
-                  </div>
-                  <button onClick={() => setBigFont(v => !v)} className="px-4 py-2 rounded-2xl shadow border text-base md:text-lg" aria-pressed={bigFont}>
-                    {bigFont ? "大字模式：开" : "大字模式：关"}
-                  </button>
-                  <button onClick={() => setShowChinese(v => !v)} className="px-4 py-2 rounded-2xl shadow border text-base md:text-lg" aria-pressed={showChinese}>
-                    {showChinese ? "中文提示：开" : "中文提示：关"}
-                  </button>
-                  <button onClick={() => setSpeakOnMatch(v => !v)} className="px-4 py-2 rounded-2xl shadow border text-base md:text-lg" aria-pressed={speakOnMatch}>
-                    {speakOnMatch ? "读音：开" : "读音：关"}
-                  </button>
-                  <button onClick={resetGame} className="px-4 py-2 rounded-2xl shadow border text-base md:text-lg">重新开始</button>
-                  <button onClick={shuffleBoard} disabled={isBusy} className="px-4 py-2 rounded-2xl shadow border text-base md:text-lg" aria-label="打乱当前棋盘，不扣步">
-                    打乱一下（不扣步）
-                  </button>
+                <button onClick={()=>setBigFont(v=>!v)} className="px-4 py-2 rounded-2xl shadow border text-base md:text-lg" aria-pressed={bigFont}>{bigFont?'大字模式：开':'大字模式：关'}</button>
+                <button onClick={()=>setShowChinese(v=>!v)} className="px-4 py-2 rounded-2xl shadow border text-base md:text-lg" aria-pressed={showChinese}>{showChinese?'中文提示：开':'中文提示：关'}</button>
+                <button onClick={()=>setSpeakOnMatch(v=>!v)} className="px-4 py-2 rounded-2xl shadow border text-base md:text-lg" aria-pressed={speakOnMatch}>{speakOnMatch?'读音：开':'读音：关'}</button>
+                <button onClick={resetGame} className="px-4 py-2 rounded-2xl shadow border text-base md:text-lg">重新开始</button>
+                <button onClick={shuffleBoard} disabled={isBusy} className="px-4 py-2 rounded-2xl shadow border text-base md:text-lg" aria-label="打乱当前棋盘，不扣步">打乱一下（不扣步）</button>
+              </div>
+            </header>
+
+            <main className="grid md:grid-cols-[1fr_auto_1fr] gap-4">
+              <aside className="rounded-2xl border p-4 shadow-sm">
+                <div className="text-lg md:text-xl font-semibold mb-2">本关目标（关卡：{level}）</div>
+                <ul className="text-base leading-relaxed"><li>· 认识并能读出本关海关词汇</li><li>· 每次消除后看卡片，跟读 1 遍</li></ul>
+                <div className="mt-3 text-base">
+                  <div>步数：<span className="font-bold">{movesLeft}</span></div>
+                  <div>得分：<span className="font-bold">{score}</span></div>
+                  {(level===1||level===2)&&(<div className="mt-1 text-sm text-gray-600">达到 <b>{LEVEL_TARGET[level]}</b> 分将解锁下一关</div>)}
                 </div>
-              </header>
+                <div className="mt-4">
+                  <div className="text-base md:text-lg font-medium mb-2">本关词汇（{WORDS.length}个）</div>
+                  <div className="flex flex-wrap gap-2">{WORDS.map(w=>(<span key={w.key} className="px-2 py-1 rounded-xl border text-sm md:text-base">{w.key}{showChinese?` · ${w.cn}`:''}</span>))}</div>
+                </div>
+              </aside>
 
-              <main className="grid md:grid-cols-[1fr_auto_1fr] gap-4">
-                <aside className="rounded-2xl border p-4 shadow-sm">
-                  <div className="text-lg md:text-xl font-semibold mb-2">本关目标（关卡：{level}）</div>
-                  <ul className="text-base leading-relaxed">
-                    <li>· 认识并能读出本关海关词汇</li>
-                    <li>· 每次消除后看卡片，跟读 1 遍</li>
-                  </ul>
-                  <div className="mt-3 text-base">
-                    <div>步数：<span className="font-bold">{movesLeft}</span></div>
-                    <div>得分：<span className="font-bold">{score}</span></div>
-                    {(level === 1 || level === 2) && (
-                      <div className="mt-1 text-sm text-gray-600">达到 <b>{LEVEL_TARGET[level]}</b> 分将解锁下一关</div>
-                    )}
-                  </div>
-                  <div className="mt-4">
-                    <div className="text-base md:text-lg font-medium mb-2">本关词汇（{WORDS.length}个）</div>
-                    <div className="flex flex-wrap gap-2">
-                      {WORDS.map((w) => (
-                        <span key={w.key} className="px-2 py-1 rounded-xl border text-sm md:text-base">
-                          {w.key} {showChinese ? `· ${w.cn}` : ""}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </aside>
-
-                <section className="flex flex-col items-center">
-                  <div
-                    className="grid"
-                    style={{ gridTemplateColumns: `repeat(${COLS}, ${CELL}px)`, gridTemplateRows: `repeat(${ROWS}, ${CELL}px)`, gap: bigFont ? 8 : 6, touchAction: "none" }}
-                  >
-                    {grid.map((row, r) => row.map((v, c) => {
-                      const isSel = selected?.r === r && selected?.c === c;
-                      const classColor = COLOR_BY_INDEX[v % COLOR_BY_INDEX.length];
-                      const tileBase = `select-none ${classColor} border-2 rounded-2xl shadow-sm flex items-center justify-center cursor-pointer hover:shadow-md transition text-center whitespace-nowrap truncate leading-tight px-2 overflow-hidden`;
-                      const keyStr = WORDS[safeIndex(v, WORDS.length)].key;
-                      return (
-                        <button
-                          key={`${r}-${c}`}
-                          onClick={() => onTileClick(r, c)}
-                          onPointerDown={onPointerDownTile(r, c)}
-                          onPointerMove={onPointerMoveTile(r, c)}
-                          onPointerUp={onPointerUpTile(r, c)}
-                          className={
-                            tileBase +
-                            (isSel ? " ring-4 ring-blue-400" : "") +
-                            (dragTarget && dragTarget.r === r && dragTarget.c === c ? " ring-4 ring-emerald-400" : "") +
-                            (isBusy ? " opacity-80" : "")
-                          }
-                          style={{ fontSize: fitFontPx(keyStr, bigFont ? 26 : 22, CELL), fontWeight: 800, lineHeight: 1.1 }}
-                          aria-label={`第${r + 1}行第${c + 1}列：${keyStr}`}
-                        >
-                          {keyStr}
-                        </button>
-                      );
+              <section className="flex flex-col items-center w-full">
+                <div ref={boardWrapRef} className="w-full">
+                  <div className="grid" style={{gridTemplateColumns:`repeat(${COLS}, ${cellPx}px)`,gridTemplateRows:`repeat(${ROWS}, ${cellPx}px)`,gap:bigFont?8:6,touchAction:'none'}}>
+                    {grid.map((row,r)=>row.map((v,c)=>{
+                      const isSel=selected?.r===r&&selected?.c===c;
+                      const color=COLOR[v%COLOR.length];
+                      const tile=`select-none ${color} border-2 rounded-2xl shadow-sm flex items-center justify-center cursor-pointer hover:shadow-md transition text-center whitespace-nowrap truncate leading-tight px-2 overflow-hidden`;
+                      const keyStr=WORDS[safeIndex(v,WORDS.length)].key;
+                      return (<button key={`${r}-${c}`} onClick={()=>onTileClick(r,c)} onPointerDown={onPointerDown(r,c)} onPointerMove={onPointerMove(r,c)} onPointerUp={onPointerUp(r,c)} className={tile+(isSel?' ring-4 ring-blue-400':'')+(dragTarget&&dragTarget.r===r&&dragTarget.c===c?' ring-4 ring-emerald-400':'')+(isBusy?' opacity-80':'')} style={{fontSize:fitFontPx(keyStr,bigFont?26:22,cellPx),fontWeight:800,lineHeight:1.1}} aria-label={`第${r+1}行第${c+1}列：${keyStr}`}>{keyStr}</button>)
                     }))}
                   </div>
-                  {movesLeft === 0 && (
-                    <div className="mt-4 p-4 rounded-2xl border shadow bg-gray-50 text-center">
-                      <div className="text-lg md:text-xl font-bold mb-1">本局结束</div>
-                      <div className="mb-2">得分：{score}。{(level === 1 || level === 2) ? `达到 ${LEVEL_TARGET[level]} 分将解锁下一关。` : "已是最后一关。"}</div>
-                      <button onClick={resetGame} className="px-4 py-2 rounded-2xl shadow border">再来一局</button>
-                    </div>
-                  )}
-                </section>
-
-                <aside className="rounded-2xl border p-4 shadow-sm">
-                  <div className="text-lg md:text-xl font-semibold mb-2">学习卡片</div>
-                  {lastMatch.length === 0 ? (
-                    <p className="text-base text-gray-600">消除后会在这里出现卡片。</p>
-                  ) : (
-                    <div className="space-y-3">
-                      {lastMatch.map((idx) => {
-                        const w = WORDS[safeIndex(idx, WORDS.length)];
-                        return (
-                          <div key={w.key} className="p-3 rounded-xl border bg-white shadow-sm">
-                            <div className="flex items-center justify-between">
-                              <div className="text-xl md:text-2xl font-bold">{w.key}</div>
-                              <button className="px-3 py-1 rounded-xl border text-sm" onClick={() => speak(w.key)} aria-label={`播放 ${w.key} 的读音`}>🔊 发音</button>
-                            </div>
-                            <div className="text-sm text-gray-600 mt-1">/{w.ipa}/</div>
-                            {showChinese && <div className="mt-1 text-base">中文：{w.cn}</div>}
-                            <div className="mt-1 text-base italic">例句：{w.phrase}</div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                  <div className="mt-4 text-sm text-gray-600 leading-relaxed">小贴士：长按“🔊 发音”后跟读 1 遍；每天玩 10 分钟，进步更快。</div>
-                </aside>
-              </main>
-
-              <footer className="mt-6 text-sm text-gray-500">
-                无计时 · 误触可取消选择 · 高对比度配色 · 可切换中文提示与读音
-              </footer>
-            </div>
-
-            {passInfo && (
-              <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-                <div className="bg-white rounded-2xl shadow-xl p-6 w-[min(90vw,520px)] text-center">
-                  <div className="text-2xl font-bold mb-2">🎉 恭喜过关！</div>
-                  <div className="text-base mb-3">
-                    你已达到本关目标分数（≥ {LEVEL_TARGET[level]} 分）。将进入
-                    <b> 第{passInfo.next === 2 ? "二" : "三"}关</b> …
-                  </div>
-                  <div className="text-sm text-gray-600 mb-4">将自动进入下一关（约 1.8 秒）。</div>
-                  <div className="flex justify-center gap-2">
-                    <button className="px-4 py-2 rounded-2xl border shadow" onClick={() => { setPassInfo(null); setLevel(passInfo.next); }}>
-                      立即进入
-                    </button>
-                    <button className="px-4 py-2 rounded-2xl border" onClick={() => setPassInfo(null)}>
-                      稍后
-                    </button>
-                  </div>
                 </div>
-                <span className="sr-only" aria-live="assertive">恭喜过关，正在为你进入下一关</span>
-              </div>
-            )}
+                {movesLeft===0&&(<div className="mt-4 p-4 rounded-2xl border shadow bg-gray-50 text-center"><div className="text-lg md:text-xl font-bold mb-1">本局结束</div><div className="mb-2">得分：{score}。{(level===1||level===2)?`达到 ${LEVEL_TARGET[level]} 分将解锁下一关。`:'已是最后一关。'}</div><button onClick={resetGame} className="px-4 py-2 rounded-2xl shadow border">再来一局</button></div>)}
+              </section>
+
+              <aside className="rounded-2xl border p-4 shadow-sm">
+                <div className="text-lg md:text-xl font-semibold mb-2">学习卡片</div>
+                {lastMatch.length===0?(<p className="text-base text-gray-600">消除后会在这里出现卡片。</p>):(<div className="space-y-3">{lastMatch.map(idx=>{const w=WORDS[safeIndex(idx,WORDS.length)];return (<div key={w.key} className="p-3 rounded-xl border bg白 shadow-sm"><div className="flex items-center justify-between"><div className="text-xl md:text-2xl font-bold">{w.key}</div><button className="px-3 py-1 rounded-xl border text-sm" onClick={()=>speak(w.key)} aria-label={`播放 ${w.key} 的读音`}>🔊 发音</button></div><div className="text-sm text-gray-600 mt-1">/{w.ipa}/</div>{showChinese&&<div className="mt-1 text-base">中文：{w.cn}</div>}<div className="mt-1 text-base italic">例句：{w.phrase}</div></div>)})}</div>)}
+                <div className="mt-4 text-sm text-gray-600 leading-relaxed">小贴士：长按“🔊 发音”后跟读 1 遍；每天玩 10 分钟，进步更快。</div>
+              </aside>
+            </main>
+
+            <footer className="mt-6 text-sm text-gray-500">无计时 · 误触可取消选择 · 高对比度配色 · 可切换中文提示与读音</footer>
           </div>
-        );
+
+          {passInfo&&(<div className="固定 inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-white rounded-2xl shadow-xl p-6 w-[min(90vw,520px)] text-center"><div className="text-2xl font-bold mb-2">🎉 恭喜过关！</div><div className="text-base mb-3">你已达到本关目标分数（≥ {LEVEL_TARGET[level]} 分）。将进入<b> 第{passInfo.next===2?'二':'三'}关</b> …</div><div className="text-sm text-gray-600 mb-4">将自动进入下一关（约 1.8 秒）。</div><div className="flex justify-center gap-2"><button className="px-4 py-2 rounded-2xl border shadow" onClick={()=>{setPassInfo(null);setLevel(passInfo.next)}}>立即进入</button><button className="px-4 py-2 rounded-2xl border" onClick={()=>setPassInfo(null)}>稍后</button></div></div><span className="sr-only" aria-live="assertive">恭喜过关，正在为你进入下一关</span></div>)}
+        </div>);
       }
 
-      // Mount
-      const root = ReactDOM.createRoot(document.getElementById('root'));
-      root.render(React.createElement(App));
+      ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
     </script>
   </body>
 </html>
